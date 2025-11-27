@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spin the Wheel</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111827;
+      color: #f9fafb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    #wheel-container {
+      position: relative;
+      width: 400px;
+      height: 400px;
+      margin-bottom: 20px;
+    }
+    #wheel {
+      width: 100%;
+      height: 100%;
+    }
+    /* Pointer triangle (arrow) */
+    #pointer {
+      position: absolute;
+      top: -5px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-top: 25px solid #FFD700;  /* Arrow pointing DOWN towards wheel */
+    }
+    #spin-btn {
+      padding: 10px 24px;
+      border: none;
+      border-radius: 999px;
+      background: #10b981;
+      color: #111827;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    #spin-btn:disabled {
+      background: #6b7280;
+      cursor: not-allowed;
+    }
+    #result {
+      margin-top: 10px;
+      font-size: 18px;
+      min-height: 24px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="wheel-container">
+    <canvas id="wheel" width="400" height="400"></canvas>
+    <div id="pointer"></div>
+  </div>
+
+  <button id="spin-btn">Spin</button>
+  <div id="result"></div>
+
+  <script>
+    // ============================
+    // CONFIG: EDIT PRIZES & ODDS
+    // ============================
+    // IMPORTANT:
+    // - All segments are drawn with EQUAL size.
+    // - "weight" controls probability ONLY (NOT slice size).
+    const segments = [
+      { label: "$3 Freeplay",  weight: 5,   color: "#fbbf24" },
+      { label: "$50 Cash",  weight: 0.1,   color: "#34d399" },
+      { label: "$100 Cash",  weight: 0.1,   color: "#60a5fa" },
+      { label: "3x +20% Bonus ", weight: 4, color: "#f97316" },
+      { label: "Try Again", weight: 5,   color: "#ef4444" }
+    ];
+
+    // KEY for "only once" per link
+    const STORAGE_KEY = "spinWheel_hasSpun";
+
+    const canvas = document.getElementById("wheel");
+    const ctx = canvas.getContext("2d");
+    const spinBtn = document.getElementById("spin-btn");
+    const resultEl = document.getElementById("result");
+
+    const size = canvas.width;
+    const center = size / 2;
+    let totalWeight = segments.reduce((sum, s) => sum + s.weight, 0);
+
+    // ============================
+    // ANGLES: EQUAL SIZED SLICES
+    // ============================
+    function computeAngles() {
+      const count = segments.length;
+      const anglePerSegment = (Math.PI * 2) / count;
+      segments.forEach((seg, i) => {
+        seg.startAngle = i * anglePerSegment;
+        seg.endAngle = seg.startAngle + anglePerSegment;
+      });
+    }
+
+    computeAngles();
+
+    let currentRotation = 0;
+    let spinning = false;
+
+    function drawWheel(rotation = 0) {
+      ctx.clearRect(0, 0, size, size);
+      ctx.save();
+      ctx.translate(center, center);
+      ctx.rotate(rotation);
+
+      segments.forEach(seg => {
+        // Draw slice
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, center - 5, seg.startAngle, seg.endAngle);
+        ctx.closePath();
+        ctx.fillStyle = seg.color;
+        ctx.fill();
+        ctx.strokeStyle = "#111827";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // ===== VERTICAL TEXT (letters stacked) =====
+        const midAngle = (seg.startAngle + seg.endAngle) / 2;
+        ctx.save();
+        ctx.rotate(midAngle);
+
+        // Move text inside the wheel so it doesn't get cut
+        ctx.translate((center - 100), 0);
+
+        // Keep text orientation tangent
+        ctx.rotate(Math.PI / 2);
+
+        ctx.fillStyle = "#111827";
+        ctx.font = "bold 12px Arial";
+        ctx.textAlign = "center";
+
+        const letters = seg.label.split("");
+        const lineHeight = 12;
+        const totalHeight = (letters.length - 1) * lineHeight;
+
+        // Center the vertical text block
+        letters.forEach((char, i) => {
+          const y = i * lineHeight - totalHeight / 2;
+          ctx.fillText(char, 0, y);
+        });
+
+        ctx.restore();
+        // ===========================================
+      });
+
+      ctx.restore();
+    }
+
+    drawWheel(currentRotation);
+
+    // ============================
+    // PROBABILITY: USE WEIGHTS ONLY
+    // ============================
+    function pickWeightedRandomSegment() {
+      let r = Math.random() * totalWeight;
+      for (const seg of segments) {
+        if (r < seg.weight) return seg;
+        r -= seg.weight;
+      }
+      return segments[segments.length - 1]; // fallback
+    }
+
+    function spin() {
+      if (spinning) return;
+
+      // Check if user already spun before
+      if (localStorage.getItem(STORAGE_KEY) === "true") {
+        alert("You already used your spin.");
+        return;
+      }
+
+      spinning = true;
+      spinBtn.disabled = true;
+      resultEl.textContent = "";
+
+      const chosenSeg = pickWeightedRandomSegment();
+      const pointerAngle = -Math.PI / 2; // top of the wheel
+      const segCenter = (chosenSeg.startAngle + chosenSeg.endAngle) / 2;
+
+      // We want segCenter + rotation = pointerAngle
+      const delta = pointerAngle - segCenter;
+      const extraSpins = 4; // full spins for animation
+      const targetRotation = extraSpins * Math.PI * 2 + delta;
+
+      const duration = 4000; // ms
+      const start = performance.now();
+      const startRotation = currentRotation;
+
+      function animate(now) {
+        const elapsed = now - start;
+        const t = Math.min(elapsed / duration, 1);
+
+        // Ease-out cubic
+        const ease = 1 - Math.pow(1 - t, 3);
+
+        currentRotation = startRotation + (targetRotation - startRotation) * ease;
+        drawWheel(currentRotation);
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          spinning = false;
+          // Mark as spun so they cannot spin again
+          localStorage.setItem(STORAGE_KEY, "true");
+          resultEl.textContent = "You won: " + chosenSeg.label + " 🎉";
+        }
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    spinBtn.addEventListener("click", spin);
+
+    // On load: if already spun, disable button
+    if (localStorage.getItem(STORAGE_KEY) === "true") {
+      spinBtn.disabled = true;
+      resultEl.textContent = "You already used your spin.";
+    }
+  </script>
+</body>
+</html>
